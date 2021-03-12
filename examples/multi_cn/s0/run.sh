@@ -54,6 +54,7 @@ checkpoint=
 # use average_checkpoint will get better result
 average_checkpoint=true
 decode_checkpoint=$dir/final.pt
+decoding_chunk_size=
 average_num=30
 decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_rescoring"
 
@@ -230,7 +231,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     fi
     # Specify decoding_chunk_size if it's a unified dynamic chunk trained model
     # -1 for full chunk
-    decoding_chunk_size=16
+    
     ctc_weight=0.5
     idx=0
     for mode in ${decode_modes}; do
@@ -250,8 +251,9 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
                 --penalty 0.0 \
                 --dict $dict \
                 --ctc_weight $ctc_weight \
-                --result_file $test_dir/text \
+                --result_file $test_dir/text_bpe \
                 ${decoding_chunk_size:+--decoding_chunk_size $decoding_chunk_size}
+            tools/spm_decode --model=${bpecode} --input_format=piece < $test_dir/text_bpe | sed -e "s/▁/ /g" > $test_dir/text
             python tools/compute-wer.py --char=1 --v=1 \
                 $feat_dir/test_${x}/text $test_dir/text > $test_dir/wer
         }

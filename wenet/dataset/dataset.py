@@ -135,7 +135,7 @@ def _waveform_distortion(waveform, distortion_methods_conf):
 
 # add speed perturb when loading wav
 # return augmented, sr
-def _load_wav_with_speed(wav_file, speed):
+def _load_wav_with_speed(wav_file, sample_rate_set=16000, speed=1.0):
     """ Load the wave from file and apply speed perpturbation
 
     Args:
@@ -144,31 +144,31 @@ def _load_wav_with_speed(wav_file, speed):
     Returns:
         augmented feature
     """
-    if speed == 1.0:
-        return torchaudio.load_wav(wav_file)
+    # if speed == 1.0:
+    #     return torchaudio.load_wav(wav_file)
+    # else:
+    si, _ = torchaudio.info(wav_file)
+
+    # get torchaudio version
+    ta_no = torchaudio.__version__.split(".")
+    ta_version = 100 * int(ta_no[0]) + 10 * int(ta_no[1]) + int(ta_no[2])
+
+    if ta_version < 80:
+        # Note: deprecated in torchaudio>=0.8.0
+        E = sox_effects.SoxEffectsChain()
+        E.append_effect_to_chain('speed', speed)
+        E.append_effect_to_chain("rate", sample_rate_set)
+        E.set_input_file(wav_file)
+        wav, sr = E.sox_build_flow_effects()
     else:
-        si, _ = torchaudio.info(wav_file)
+        # Note: enable in torchaudio>=0.8.0
+        wav, sr = sox_effects.apply_effects_file(wav_file,
+                                                    [['speed', str(speed)],
+                                                    ['rate', str(sample_rate_set)]])
 
-        # get torchaudio version
-        ta_no = torchaudio.__version__.split(".")
-        ta_version = 100 * int(ta_no[0]) + 10 * int(ta_no[1]) + int(ta_no[2])
-
-        if ta_version < 80:
-            # Note: deprecated in torchaudio>=0.8.0
-            E = sox_effects.SoxEffectsChain()
-            E.append_effect_to_chain('speed', speed)
-            E.append_effect_to_chain("rate", si.rate)
-            E.set_input_file(wav_file)
-            wav, sr = E.sox_build_flow_effects()
-        else:
-            # Note: enable in torchaudio>=0.8.0
-            wav, sr = sox_effects.apply_effects_file(wav_file,
-                                                     [['speed', str(speed)],
-                                                      ['rate', str(si.rate)]])
-
-        # sox will normalize the waveform, scale to [-32768, 32767]
-        wav = wav * (1 << 15)
-        return wav, sr
+    # sox will normalize the waveform, scale to [-32768, 32767]
+    wav = wav * (1 << 15)
+    return wav, sr
 
 
 def _extract_feature(batch, speed_perturb, wav_distortion_conf,
@@ -192,6 +192,8 @@ def _extract_feature(batch, speed_perturb, wav_distortion_conf,
     wav_dither = wav_distortion_conf['wav_dither']
     wav_distortion_rate = wav_distortion_conf['wav_distortion_rate']
     distortion_methods_conf = wav_distortion_conf['distortion_methods']
+    sample_rate_set = feature_extraction_conf.get('sample_rate', 16000)
+    speed = 1.0
     if speed_perturb:
         speeds = [1.0, 1.1, 0.9]
         weights = [1, 1, 1]
@@ -199,10 +201,7 @@ def _extract_feature(batch, speed_perturb, wav_distortion_conf,
         # speed = random.choice(speeds)
     for i, x in enumerate(batch):
         try:
-            if speed_perturb:
-                waveform, sample_rate = _load_wav_with_speed(x[1], speed)
-            else:
-                waveform, sample_rate = torchaudio.load_wav(x[1])
+            waveform, sample_rate = _load_wav_with_speed(x[1], sample_rate_set, speed)
             if wav_distortion_rate > 0.0:
                 r = random.uniform(0, 1)
                 if r < wav_distortion_rate:

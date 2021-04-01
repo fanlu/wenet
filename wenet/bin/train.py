@@ -67,6 +67,10 @@ if __name__ == '__main__':
                         dest='init_method',
                         default=None,
                         help='ddp init method')
+    parser.add_argument('--local_rank',
+                        type=int,
+                        default=-1,
+                        help='gpu id for this local rank, -1 for cpu')
     parser.add_argument('--num_workers',
                         default=0,
                         type=int,
@@ -85,9 +89,17 @@ if __name__ == '__main__':
 
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    # os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
     # Set random seed
     torch.manual_seed(777)
+    if 'SGE_TASK_ID' in os.environ:
+        node_rank = int(os.environ['SGE_TASK_ID']) - 1
+        args.rank = node_rank * 4 + args.local_rank
+    else:
+        args.rank = args.local_rank
+    num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
+    print(num_gpus)
+    args.gpu = args.local_rank
     print(args)
     with open(args.config, 'r') as fin:
         configs = yaml.load(fin, Loader=yaml.FullLoader)
@@ -117,10 +129,13 @@ if __name__ == '__main__':
 
     if distributed:
         logging.info('training on multiple gpus, this gpu {}'.format(args.gpu))
+        torch.cuda.set_device(args.local_rank)
+        logging.info('start')
         dist.init_process_group(args.dist_backend,
                                 init_method=args.init_method,
                                 world_size=args.world_size,
                                 rank=args.rank)
+        logging.info('end')
         train_sampler = torch.utils.data.distributed.DistributedSampler(
             train_dataset, shuffle=True)
         cv_sampler = torch.utils.data.distributed.DistributedSampler(
@@ -128,7 +143,7 @@ if __name__ == '__main__':
     else:
         train_sampler = None
         cv_sampler = None
-
+    logging.info('start process data')
     train_data_loader = DataLoader(train_dataset,
                                    collate_fn=train_collate_func,
                                    sampler=train_sampler,
@@ -194,7 +209,7 @@ if __name__ == '__main__':
         # cuda model is required for nn.parallel.DistributedDataParallel
         model.cuda()
         model = torch.nn.parallel.DistributedDataParallel(
-            model, find_unused_parameters=True)
+            model, find_unused_parameters=True, device_ids=[args.local_rank], output_device=args.local_rank)
         device = torch.device("cuda")
     else:
         use_cuda = args.gpu >= 0 and torch.cuda.is_available()

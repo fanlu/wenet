@@ -57,6 +57,8 @@ class Executor:
                                                      feats_lengths,
                                                      target,
                                                      target_lengths)
+                    # logging.debug(loss.dtype)                                 
+                    # assert loss.dtype is torch.float16
                     loss = loss / accum_grad
                 if use_fp16:
                     scaler.scale(loss).backward()

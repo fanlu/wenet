@@ -39,9 +39,11 @@ class CTC(torch.nn.Module):
             ys_lens: batch of lengths of character sequence (B)
         """
         # hs_pad: (B, L, NProj) -> ys_hat: (B, L, Nvocab)
+        # assert hs_pad.dtype is torch.float16
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
         # ys_hat: (B, L, D) -> (L, B, D)
         ys_hat = ys_hat.transpose(0, 1)
+        # assert ys_hat.dtype is torch.float16
         ys_hat = ys_hat.log_softmax(2)
         loss = self.ctc_loss(ys_hat, ys_pad, hlens, ys_lens)
         # Batch-size average

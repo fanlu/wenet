@@ -5,12 +5,12 @@
 
 # Use this to control how many gpu you use, It's 1-gpu training if you specify
 # just 1gpu, otherwise it's is multiple gpu training based on DDP in pytorch
-export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+export CUDA_VISIBLE_DEVICES="0,1,2,3"
 # The NCCL_SOCKET_IFNAME variable specifies which IP interface to use for nccl
 # communication. More details can be found in
 # https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
 # export NCCL_SOCKET_IFNAME=ens4f1
-export NCCL_DEBUG=INFO
+# export NCCL_DEBUG=INFO
 stage=0 # start from 0 if you need to start from data preparation
 stop_stage=5
 # The num of nodes or machines used for multi-machine training
@@ -151,9 +151,10 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
             --ddp.world_size $world_size \
             --ddp.rank $rank \
             --ddp.dist_backend $dist_backend \
-            --num_workers 2 \
+            --local_rank $rank \
+            --num_workers 8 \
             $cmvn_opts \
-            --pin_memory
+            --pin_memory --fp16
     } &
     done
     wait

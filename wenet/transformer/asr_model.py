@@ -88,7 +88,7 @@ class ASRModel(torch.nn.Module):
         # 1. Encoder
         encoder_out, encoder_mask = self.encoder(speech, speech_lengths)
         encoder_out_lens = encoder_mask.squeeze(1).sum(1)
-
+        # assert encoder_out.dtype is torch.float16
         # 2a. Attention-decoder branch
         if self.ctc_weight != 1.0:
             loss_att, acc_att = self._calc_att_loss(encoder_out, encoder_mask,
@@ -125,7 +125,7 @@ class ASRModel(torch.nn.Module):
         # 1. Forward decoder
         decoder_out, _ = self.decoder(encoder_out, encoder_mask, ys_in_pad,
                                       ys_in_lens)
-
+        # assert decoder_out.dtype is torch.float16
         # 2. Compute attention loss
         loss_att = self.criterion_att(decoder_out, ys_out_pad)
         acc_att = th_accuracy(

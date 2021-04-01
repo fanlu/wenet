@@ -7,13 +7,14 @@
 # Use this to control how many gpu you use, It's 1-gpu training if you specify
 # just 1gpu, otherwise it's is multiple gpu training based on DDP in pytorch
 export CUDA_VISIBLE_DEVICES="0,1,2,3"
-stage=0 # start from 0 if you need to start from data preparation
-stop_stage=5
 
 # The NCCL_SOCKET_IFNAME variable specifies which IP interface to use for nccl
 # communication. More details can be found in
 # https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
 # export NCCL_SOCKET_IFNAME=ens4f1
+export NCCL_DEBUG=INFO
+stage=0 # start from 0 if you need to start from data preparation
+stop_stage=5
 # The num of nodes or machines used for multi-machine training
 # Default 1 for single machine/node
 # NFS will be needed if you want run multi-machine training
@@ -22,9 +23,9 @@ num_nodes=1
 # The first node/machine sets node_rank 0, the second one sets node_rank 1
 # the third one set node_rank 2, and so on. Default 0
 node_rank=0
-
 # data
-dbase=/ssd/nfs06/di.wu/open_source
+# data=/export/expts4/chaoyang/
+dbase=
 aidatatang_url=www.openslr.org/resources/62
 aishell_url=www.openslr.org/resources/33
 magicdata_url=www.openslr.org/resources/68
@@ -34,10 +35,10 @@ thchs_url=www.openslr.org/resources/18
 
 nj=16
 feat_dir=raw_wav
+dict=data/dict/lang_char.txt
 
 train_set=train
 dev_set=dev
-
 test_sets="aishell aidatatang magicdata thchs aishell2 tal_asr"
 has_aishell2=false  # AISHELL2 train set is not publically downloadable
                     # with this option true, the script assumes you have it in $dbase
@@ -59,6 +60,7 @@ checkpoint=
 # use average_checkpoint will get better result
 average_checkpoint=true
 decode_checkpoint=$dir/final.pt
+decoding_chunk_size=
 average_num=30
 decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_rescoring"
 
@@ -91,9 +93,8 @@ if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
     local/magicdata_data_prep.sh $dbase/magicdata/ data/magicdata || exit 1;
     local/primewords_data_prep.sh $dbase/primewords data/primewords || exit 1;
     local/stcmds_data_prep.sh $dbase/stcmds data/stcmds || exit 1;
-    local/tal_data_prep.sh $dbase/TAL/TAL_ASR data/tal_asr || exit 1;
-    local/tal_mix_data_prep.sh $dbase/TAL/TAL_ASR_mix data/tal_mix || exit 1;
-
+    local/tal_data_prep.sh $dbase/TAL/TAL_ASR-1/aisolution_data data/tal_asr || exit 1;
+    local/tal_csasr_data_prep.sh $dbase/TAL/TAL_CSASR data/tal_csasr || exit 1;
     if $has_aishell2; then
         local/aishell2_data_prep.sh $dbase/aishell2/IOS data/aishell2/train || exit 1;
         local/aishell2_data_prep.sh $dbase/aishell2/IOS/dev data/aishell2/dev || exit 1;
@@ -208,11 +209,12 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     # Training
     mkdir -p $dir
     INIT_FILE=$dir/ddp_init
-    # You had better rm it manually before you start run.sh on first node.
-    # rm -f $INIT_FILE # delete old one before starting
+    rm -f $INIT_FILE # delete old one before starting
     init_method=file://$(readlink -f $INIT_FILE)
     echo "$0: init method is $init_method"
+    # The number of gpus runing on each node/machine 4
     num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
+    echo "$num_gpus"
     # Use "nccl" if it works, otherwise use "gloo"
     dist_backend="nccl"
     # The total number of processes/gpus, so that the master knows
@@ -227,29 +229,40 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     # train.py will write $train_config to $dir/train.yaml with model input
     # and output dimension, train.yaml will be used for inference or model
     # export later
-    for ((i = 0; i < $num_gpus; ++i)); do
-    {
-        gpu_id=$(echo $CUDA_VISIBLE_DEVICES | cut -d',' -f$[$i+1])
-        # Rank of each gpu/process used for knowing whether it is
-        # the master of a worker.
-        rank=`expr $node_rank \* $num_gpus + $i`
-
-        python wenet/bin/train.py --gpu $gpu_id \
-            --config $train_config \
-            --train_data ${feat_dir}_${en_modeling_unit}/$train_set/format.data \
-            --cv_data ${feat_dir}_${en_modeling_unit}/$dev_set/format.data \
-            ${checkpoint:+--checkpoint $checkpoint} \
-            --model_dir $dir \
-            --ddp.init_method $init_method \
-            --ddp.world_size $world_size \
-            --ddp.rank $rank \
-            --ddp.dist_backend $dist_backend \
-            --num_workers 2 \
-            $cmvn_opts \
-            --pin_memory
-    } &
-    done
-    wait
+    # for ((i = 0; i < $num_gpus; ++i)); do
+    # {
+    #     gpu_id=$(echo $CUDA_VISIBLE_DEVICES | cut -d',' -f$[$i+1])
+    #     # Rank of each gpu/process used for knowing whether it is
+    #     # the master of a worker.
+    #     rank=`expr $node_rank \* $num_gpus + $i`
+    #     python wenet/bin/train.py --gpu $gpu_id \
+    #         --config $train_config \
+    #         --train_data $feat_dir/$train_set/format.data \
+    #         --cv_data $feat_dir/$dev_set/format.data \
+    #         ${checkpoint:+--checkpoint $checkpoint} \
+    #         --model_dir $dir \
+    #         --ddp.init_method $init_method \
+    #         --ddp.world_size $world_size \
+    #         --ddp.rank $rank \
+    #         --ddp.dist_backend $dist_backend \
+    #         --num_workers 2 \
+    #         $cmvn_opts
+    # } &
+    # done
+    # wait
+    tools/queue.pl --config conf/queue_g2.conf --gpu $num_gpus JOB=1:$num_nodes $dir/logs/train.JOB.log \
+        python -m torch.distributed.launch --nproc_per_node=$num_gpus \
+        wenet/bin/train.py \
+        --config $train_config \
+        --train_data $feat_dir/$train_set/format.data \
+        --cv_data $feat_dir/$dev_set/format.data \
+        ${checkpoint:+--checkpoint $checkpoint} \
+        --model_dir $dir \
+        --ddp.init_method $init_method \
+        --ddp.world_size $world_size \
+        --ddp.dist_backend $dist_backend \
+        --num_workers 2 \
+        $cmvn_opts
 fi
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
@@ -293,7 +306,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
                 --result_file $test_dir/text_${en_modeling_unit} \
                 ${decoding_chunk_size:+--decoding_chunk_size $decoding_chunk_size}
             if $en_modeling_unit = "bpe"; then
-               tools/spm_decode --model=${bpemodel}.model --input_format=piece < $test_dir/text_${en_modeling_unit} | sed -e "s/▁/ /g" > $test_dir/text
+                tools/spm_decode --model=${bpemodel}.model --input_format=piece < $test_dir/text_${en_modeling_unit} | sed -e "s/▁/ /g" > $test_dir/text
             else
                 cat $test_dir/text_${en_modeling_unit} | sed -e "s/▁/ /g" > $test_dir/text
             fi
